@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#162c2b">
 <title>ことばの島</title>
-<link rel="stylesheet" href="style.css?v=17">
-<script type="module" src="island.js?v=24"></script>
+<link rel="stylesheet" href="style.css?v=18">
+<script type="module" src="island.js?v=25"></script>
 </head>
 <body>
 <main>
@@ -34,6 +34,25 @@
     <div id="confirm" hidden><button id="yes" aria-label="そう">✓</button><button id="no" aria-label="ちがう">✕</button></div>
     <p id="gestureStatus" hidden></p>
     <p><label>相手役 <select id="characterChoice"></select></label></p>
+    <button id="openPlacement">水とコップの練習</button>
+    <section id="placementLesson" aria-label="水とコップの練習" hidden>
+      <div id="lessonObjects">
+        <button data-target="water">💧 水</button>
+        <button data-target="cup">🥛 空のコップ</button>
+        <button id="lessonTable" data-target="place">▱ 台の上</button>
+      </div>
+      <button id="listenExample">音を聞く</button>
+      <button id="proposePlacement">水を置くよう頼む</button>
+      <button id="askPlacement">相手のお願いを聞く</button>
+      <p id="lessonMove" role="status"></p>
+      <form id="placementChoices" hidden>
+        <label>物 <select name="object" required><option value="">選ぶ</option><option value="water">水</option><option value="cup">空のコップ</option></select></label>
+        <label>場所 <select name="location" required><option value="">選ぶ</option><option value="place">台の上</option><option value="other">地面</option></select></label>
+        <label>動作 <select name="action" required><option value="">選ぶ</option><option value="place">置く</option><option value="give">渡す</option></select></label>
+        <button type="submit">動作をする</button>
+        <button type="button" id="placementHint">身ぶりを見る</button>
+      </form>
+    </section>
     <button id="start" class="primary">島に入る</button>
     <details><summary>音声認識の設定</summary>
       <p><label>認識方法 <select id="speechMode"><option value="safari">Safari</option><option value="whisper">NAS（Whisper）</option></select></label></p>

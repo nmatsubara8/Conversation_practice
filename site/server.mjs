@@ -8,6 +8,7 @@ const staticFiles = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/island.js', ['island.js', 'text/javascript; charset=utf-8']],
   ['/speech.js', ['speech.js', 'text/javascript; charset=utf-8']],
+  ['/placement.mjs', ['placement.mjs', 'text/javascript; charset=utf-8']],
   ['/characters.mjs', ['characters.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
 ]);

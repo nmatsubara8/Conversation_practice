@@ -1,3 +1,4 @@
+import { createPlacement, examples } from './placement.mjs';
 import { createWhisperSpeech } from './speech.js?v=18';
 import { characters, defaultCharacter, findCharacter } from './characters.mjs';
 
@@ -18,6 +19,11 @@ let memory = { name: '', water: '' };
 let character = defaultCharacter;
 const savedScenes = new Map();
 let phase = 'name';
+const placement = createPlacement();
+let lessonTarget;
+let exampleRequested = false;
+let lessonQuiz = false;
+let lessonHint = false;
 let nameCorrection;
 let pointing;
 let poseLandmarker;
@@ -66,7 +72,7 @@ const whisperSpeech = createWhisperSpeech({
     const gesture = recentPointing();
     const naming = phase === 'name' || gesture === 'self';
     const hint = naming && !speaking ? element('nameHint').value.trim() : '';
-    const language = speaking ? 'auto' : naming ? nameLanguage.value : !acceptsSpeech() || phase === 'water' ? 'auto' : 'en';
+    const language = speaking ? 'auto' : naming ? nameLanguage.value : !acceptsSpeech() || ['water', 'lesson'].includes(phase) ? 'auto' : 'en';
     return { phase, language, hint, gesture, playback: speaking, audioTurn, endSilenceMs: naming && !speaking ? 1050 : 650 };
   },
   onSustainedSpeech: pauseForWhisper,
@@ -81,11 +87,11 @@ const whisperSpeech = createWhisperSpeech({
 });
 
 function acceptsSpeech() {
-  return ['name', 'water', 'practice'].includes(phase);
+  return phase === 'lesson' ? Boolean(lessonTarget && !placement.pending && !lessonQuiz) : ['name', 'water', 'practice'].includes(phase);
 }
 
 function canCorrectName() {
-  return Boolean(memory.name) && !['name', 'name-confirm'].includes(phase);
+  return phase !== 'lesson' && Boolean(memory.name) && !['name', 'name-confirm'].includes(phase);
 }
 
 function recentPointing() {
@@ -97,12 +103,14 @@ function hearsSpeech() {
 }
 
 function waitingForGesture() {
-  return active && ['name-confirm', 'check', 'practice-confirm'].includes(phase);
+  return active && (phase === 'lesson' ? Boolean(placement.pending && !speaking) : ['name-confirm', 'check', 'practice-confirm'].includes(phase));
 }
 
 function showCameraStatus(message = cameraStatus) {
   element('nameReviewRow').hidden = !active || phase !== 'name-confirm';
   gestureStatus.hidden = !waitingForGesture();
+  camera.classList.toggle('preview', waitingForGesture() && Boolean(cameraStream));
+  if (phase === 'lesson') confirm.hidden = !waitingForGesture();
   if (gestureStatus.textContent !== message) gestureStatus.textContent = message;
   camera.classList.toggle('preview', waitingForGesture() && Boolean(cameraStream));
 }
@@ -215,6 +223,10 @@ async function routeSpeechTurn(text, turn) {
   const phrase = text.trim();
   const key = normalizeSpeech(phrase);
   const isPlayback = turn.playback && normalizeSpeech(turn.playback).includes(key);
+  if (phase === 'lesson') {
+    if (key && !isPlayback && acceptsSpeech() && !speaking) receiveLessonSpeech(phrase);
+    return;
+  }
   if (key && !isPlayback && turn.gesture === 'self' && (phase === 'name' || canCorrectName())) {
     if (phase !== 'name') {
       nameCorrection = { phase, candidate };
@@ -281,7 +293,11 @@ async function routeSpeechTurn(text, turn) {
 
 function sayShared(concept) {
   const text = concept === 'name' || concept === 'water' ? memory[concept] : '';
-  const lang = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(text) ? 'ja-JP' : 'en-US';
+  speakActor(text);
+}
+
+function speakActor(text, language, onFinish) {
+  const lang = language || (/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(text) ? 'ja-JP' : 'en-US');
 
   stopAudio();
   if (!active || !text) return;
@@ -315,6 +331,8 @@ function sayShared(concept) {
     if (turn !== audioTurn) return;
     speaking = '';
     actor.classList.remove('speaking');
+    if (onFinish) { onFinish(); return; }
+    if (phase === 'lesson') showCameraStatus();
     if (active && acceptsSpeech()) actor.classList.add('listening');
     scheduleNudge();
   };
@@ -337,12 +355,18 @@ function speakShared(concept) {
 }
 
 function showPhase() {
+  element('placementLesson').hidden = phase !== 'lesson';
+  element('openPlacement').hidden = phase === 'lesson';
+  if (phase === 'lesson') {
+    element('start').hidden = true;
+    renderLesson();
+  }
   const grove = !['name', 'name-confirm'].includes(phase);
   scene.dataset.phase = phase;
   scene.classList.toggle('grove', grove);
   element('place').textContent = grove ? '林の入口' : '浜辺';
   for (const id of ['water', 'tree']) {
-    element(id).hidden = !grove;
+    element(id).hidden = !grove || phase === 'lesson';
     element(id).setAttribute('aria-pressed', String(id === target));
   }
   element('water').dataset.indicated = String(['water', 'check'].includes(phase) && target === 'water');
@@ -352,6 +376,7 @@ function showPhase() {
   pose(phase === 'name' ? 'intro' : element('water').dataset.indicated === 'true' ? 'point-water' : phase === 'check' ? 'point' : 'beckon');
   if (phase === 'done') pose('offer-water', 'happy');
   status.textContent = {
+    lesson: '水・空のコップ・置き場所を指して、言葉を教えましょう。',
     name: '相手が自分を指しています。自分を指して名前を伝えましょう。',
     'name-confirm': '名前は合っていますか？',
     water: '相手が指したものを、あなたの言葉で教えましょう。',
@@ -405,7 +430,7 @@ function listen() {
   }
   const current = new SpeechRecognition();
   recognition = current;
-  current.lang = phase === 'water' || (phase === 'name' && nameLanguage.value === 'ja') ? 'ja-JP' : 'en-US';
+  current.lang = ['water', 'lesson'].includes(phase) || (phase === 'name' && nameLanguage.value === 'ja') ? 'ja-JP' : 'en-US';
   current.continuous = true;
   current.interimResults = true;
   let overlappingTurn;
@@ -484,6 +509,19 @@ function answer(yes) {
   if (!waitingForGesture()) return;
   gestureOrigin = undefined;
   gesturePeak = undefined;
+  if (phase === 'lesson') {
+    const wasRequest = placement.pending.target === 'request';
+    placement.answer(yes);
+    promptText();
+    renderLesson();
+    refreshRecognition();
+    status.textContent = yes ? '意味を共有しました。' : 'もう一度、指して言い直せます。';
+    if (yes && wasRequest) {
+      lessonTarget = undefined;
+      element('lessonTable').dataset.water = 'true';
+    }
+    return;
+  }
   if (phase === 'practice-confirm') {
     if (yes) {
       advance('done');
@@ -734,6 +772,11 @@ showCharacter();
 characterChoice.onchange = () => {
   const next = findCharacter(characterChoice.value);
   if (active || !next || next === character) return;
+  if (phase === 'lesson') {
+    character = next;
+    showCharacter();
+    return;
+  }
   savedScenes.set(character.id, { memory, phase, target, candidate, nameCorrection, review: nameReview.value });
   character = next;
   const saved = savedScenes.get(character.id);
@@ -751,6 +794,110 @@ characterChoice.onchange = () => {
   showCharacter();
   showPhase();
   status.textContent = saved ? `${character.label}との続きから始められます。` : `${character.label}と出会う浜辺から始めます。`;
+};
+
+function renderLesson() {
+  element('listenExample').disabled = !active || lessonQuiz || !Object.hasOwn(examples, lessonTarget) || Boolean(placement.pending);
+  element('proposePlacement').disabled = !active || lessonQuiz || Boolean(placement.pending) || !Object.keys(examples).every(key => placement.agreed[key]);
+  element('askPlacement').disabled = !active || !placement.request || Boolean(placement.pending);
+  element('placementChoices').hidden = !lessonQuiz;
+  for (const button of element('lessonObjects').querySelectorAll('button')) {
+    button.disabled = !active || lessonQuiz;
+    button.setAttribute('aria-pressed', String(button.dataset.target === lessonTarget));
+  }
+  showCameraStatus();
+}
+
+function receiveLessonSpeech(phrase) {
+  heard.textContent = `聞き取った声　${phrase}`;
+  heard.hidden = false;
+  if (lessonTarget === 'request') placement.propose(phrase);
+  else placement.hear(lessonTarget, phrase, exampleRequested);
+  if (!placement.pending) {
+    status.textContent = '水と置き場所の言葉を使って、もう一度頼んでください。';
+    return;
+  }
+  pose(lessonTarget === 'water' || lessonTarget === 'request' ? 'point-water' : 'point');
+  if (lessonTarget === 'request') {
+    element('lessonMove').textContent = '相手役が水を持ち上げ、指定の台に置こうとしています。';
+  } else if (exampleRequested) {
+    const target = lessonTarget;
+    const attempt = placement.pending;
+    // Keep the bilingual confirmation inside the user-requested audio exchange.
+    speakActor(examples[target], 'en-US', () => speakActor(attempt.text, 'ja-JP'));
+  }
+  status.textContent = '指した対象と聞き取った表現が合っていれば ✓、違えば ✕。';
+  renderLesson();
+}
+
+element('openPlacement').onclick = () => {
+  if (phase === 'lesson') return;
+  if (!active) { phase = 'lesson'; setActive(true); }
+  else advance('lesson');
+};
+
+element('lessonObjects').onclick = ({ target: button }) => {
+  if (!active || lessonQuiz || !Object.hasOwn(examples, button.dataset.target)) return;
+  placement.answer(false);
+  promptText();
+  lessonTarget = button.dataset.target;
+  exampleRequested = false;
+  element('lessonTable').dataset.water = 'false';
+  element('lessonMove').textContent = '';
+  pose(lessonTarget === 'water' ? 'point-water' : 'point');
+  status.textContent = '指したものをあなたの言葉で伝えてください。英語の音も聞けます。';
+  renderLesson();
+  refreshRecognition();
+};
+element('listenExample').onclick = () => {
+  if (!active || lessonQuiz || placement.pending || !Object.hasOwn(examples, lessonTarget)) return;
+  exampleRequested = true;
+  speakActor(examples[lessonTarget], 'en-US');
+};
+element('proposePlacement').onclick = () => {
+  if (!active || lessonQuiz || placement.pending) return;
+  lessonTarget = 'request';
+  element('lessonMove').textContent = '';
+  status.textContent = '水と台を指すつもりで、覚えた言葉を組み合わせて頼んでください。';
+  renderLesson();
+  refreshRecognition();
+};
+element('askPlacement').onclick = () => {
+  if (!active || !placement.request || placement.pending) return;
+  lessonQuiz = true;
+  lessonHint = false;
+  const form = element('placementChoices');
+  form.reset();
+  element('lessonTable').dataset.water = 'false';
+  element('lessonTable').dataset.hint = 'false';
+  element('lessonMove').textContent = '';
+  pose();
+  speakActor(placement.request);
+  status.textContent = '聞こえたお願いに合わせて、物・場所・動作を選んでください。';
+  renderLesson();
+};
+element('placementHint').onclick = () => {
+  if (!active || !lessonQuiz) return;
+  lessonHint = true;
+  pose('point-water');
+  element('lessonTable').dataset.hint = 'true';
+  element('lessonMove').textContent = '相手役が水を指し、手で台の上に置く動作を示しています。';
+};
+element('placementChoices').onsubmit = (event) => {
+  event.preventDefault();
+  if (!active || !lessonQuiz || speaking) return;
+  const choices = new FormData(event.target);
+  const result = placement.perform(choices.get('object'), choices.get('location'), choices.get('action'), lessonHint);
+  if (result.object && result.location && result.action) {
+    lessonQuiz = false;
+    lessonTarget = undefined;
+    element('lessonTable').dataset.water = 'true';
+    element('lessonMove').textContent = '水を台に置きました。';
+    pose('happy');
+  } else {
+    element('lessonMove').textContent = '相手役が待っています。もう一度選べます。';
+  }
+  renderLesson();
 };
 
 element('start').onclick = () => setActive(true);
