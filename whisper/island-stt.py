@@ -59,7 +59,7 @@ def make_handler(model, settings):
             if not self.allowed():
                 return
             if self.path == "/health":
-                self.send_json(200, {"status": "ready", "model": settings.model, "device": "cpu"})
+                self.send_json(200, {"status": "ready", "model": settings.model, "device": settings.device})
             else:
                 self.send_json(404, {"error": "Not found"})
 
@@ -125,14 +125,18 @@ def main():
     parser = argparse.ArgumentParser(description="Island PoC local speech recognition")
     parser.add_argument("--model", choices=("small", "medium"), default="small")
     parser.add_argument("--threads", type=int, choices=range(1, 7), default=4)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     settings = parser.parse_args()
 
     from faster_whisper import WhisperModel
 
-    print(f"Loading Whisper {settings.model} on CPU...", flush=True)
-    model = WhisperModel(settings.model, device="cpu", compute_type="int8", cpu_threads=settings.threads)
+    compute_type = "float16" if settings.device == "cuda" else "int8"
+    print(f"Loading Whisper {settings.model} on {settings.device} ({compute_type})...", flush=True)
+    model = WhisperModel(
+        settings.model, device=settings.device, compute_type=compute_type, cpu_threads=settings.threads
+    )
     with ThreadingHTTPServer(("127.0.0.1", 11435), make_handler(model, settings)) as server:
-        print("NAS Whisper ready on http://127.0.0.1:11435", flush=True)
+        print("Whisper ready on http://127.0.0.1:11435", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

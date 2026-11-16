@@ -63,3 +63,7 @@ sudo docker compose -p island-poc exec -T web node --check /app/placement.mjs
 6. 水を選び直して別の呼び方を教え、合意すると、以前のお願いを聞くボタンが無効になることを確認します。水と場所の言葉を組み合わせて、お願いを再確認できます。
 
 この版の学習記録は開いているページ内に保持します。NAS への自動保存、日記、家族別ログイン、Luanti での会話連携は今後の実装です。
+
+## Whisper の処理時間を比較する
+
+[Windows の GPU と NAS の CPU で同じ音声を測る手順](whisper/README.md) を用意しています。

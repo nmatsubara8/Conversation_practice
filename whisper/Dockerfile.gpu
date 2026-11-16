@@ -1,0 +1,12 @@
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3-venv libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/whisper \
+    && /opt/whisper/bin/pip install --no-cache-dir faster-whisper==1.2.1 \
+    && useradd --create-home --uid 10001 whisper \
+    && install -d -o whisper -g whisper /models
+ENV HF_HOME=/models PYTHONUNBUFFERED=1 PATH=/opt/whisper/bin:$PATH
+WORKDIR /app
+COPY --chmod=644 island-stt.py ./
+USER whisper
+CMD ["python", "island-stt.py", "--model", "medium", "--device", "cuda"]
