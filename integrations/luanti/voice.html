@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マヤの読み上げ</title>
+<style>
+  body { margin: 2rem auto; padding: 0 1rem; max-width: 36rem; font: 1rem/1.6 system-ui; }
+  label, p { display: block; margin-block: 1rem; }
+  button, input { font: inherit; }
+</style>
+<h1>マヤの読み上げ</h1>
+<form id="voice">
+  <label>Luantiのプレイヤー名 <input name="player" required pattern="[A-Za-z0-9_\-]{1,40}"></label>
+  <button type="submit">新しい発話を読み上げる</button>
+  <button id="stop" type="button" disabled>停止</button>
+</form>
+<p id="status" role="status"></p>
+<p id="caption" lang="en-US"></p>
+<script type="module">
+  const form = document.querySelector('#voice');
+  const status = document.querySelector('#status');
+  const caption = document.querySelector('#caption');
+  const stop = document.querySelector('#stop');
+  const start = form.querySelector('[type="submit"]');
+  let controller;
+
+  async function history(player, signal) {
+    const response = await fetch('/practice/companion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'history', player }),
+      signal,
+    });
+    if (!response.ok) throw new Error('History unavailable');
+    return (await response.json()).entries;
+  }
+
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (!window.speechSynthesis) {
+      status.textContent = 'このブラウザーでは読み上げを利用できません。';
+      return;
+    }
+    const player = form.elements.player.value;
+    const run = new AbortController();
+    controller = run;
+    form.elements.player.disabled = start.disabled = true;
+    stop.disabled = false;
+    const ready = new SpeechSynthesisUtterance('読み上げを開始します。');
+    ready.lang = 'ja-JP';
+    speechSynthesis.speak(ready);
+    try {
+      let latest = (await history(player, run.signal))[0]?.id;
+      status.textContent = '新しい発話を待っています。';
+      while (!run.signal.aborted) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (run.signal.aborted) break;
+        const entries = await history(player, run.signal);
+        if (!entries.length || entries[0].id === latest) continue;
+        const boundary = entries.findIndex(entry => entry.id === latest);
+        const fresh = entries.slice(0, boundary < 0 ? entries.length : boundary).reverse();
+        latest = entries[0].id;
+        for (const entry of fresh) {
+          caption.textContent = entry.text;
+          const utterance = new SpeechSynthesisUtterance(entry.text);
+          utterance.lang = 'en-US';
+          speechSynthesis.speak(utterance);
+        }
+      }
+    } catch {
+      if (!run.signal.aborted) status.textContent = '発話履歴を取得できませんでした。';
+    } finally {
+      if (controller === run) {
+        controller = undefined;
+        form.elements.player.disabled = start.disabled = false;
+        stop.disabled = true;
+      }
+    }
+  };
+
+  stop.onclick = () => {
+    controller?.abort();
+    speechSynthesis.cancel();
+    status.textContent = '読み上げを停止しました。';
+  };
+</script>
+</html>

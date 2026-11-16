@@ -74,3 +74,5 @@ core.register_on_leaveplayer(function(player)
     selected[name] = nil
     pending[name] = nil
 end)
+
+assert(loadfile(core.get_modpath(core.get_current_modname()) .. "/maya.lua"))(http)
