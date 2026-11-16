@@ -5,13 +5,13 @@ const element = (id) => document.getElementById(id);
 const [scene, actor, status, spoken, heard, helpText, camera, media, confirm] =
   ['scene', 'actor', 'status', 'spoken', 'heard', 'helpText', 'camera', 'media', 'confirm'].map(element);
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const prompts = {
-  water: { speech: 'This is water. What do you call it?', hint: '「これは水。あなたは何と呼ぶ？」と聞いています。あなたの言葉で答えてください。' },
-  check: { speech: '', hint: '相手は聞こえた言葉をまねしています。合っていればうなずき、違えば首を横に振ってください。' },
-  recall: { speech: '', hint: '相手があなたから教わった言葉を使っています。タップして水を指してください。' },
-  practice: { speech: 'What do you need?', hint: '「何が必要？」と聞いています。さっき聞いた英語の単語で、水を頼んでみましょう。単語ひとつでも通じます。' },
-  'practice-confirm': { speech: 'Do you mean you’d like some water?', hint: '「水が欲しいということ？」と確かめています。うなずいて伝えるか、首を横に振って言い直せます。' },
-  done: { speech: 'Here you go.', hint: '水を頼めたので、相手が水を渡してくれました。' },
+const hints = {
+  water: '相手が指したものを、あなたの言葉で教えてください。',
+  check: '画面の聞き取り結果と指されたものを確認してください。合っていればうなずき、違えば首を横に振ってください。',
+  recall: '相手があなたから教わった言葉を使っています。タップして水を指してください。',
+  practice: '覚えた言葉で水を頼みましょう。',
+  'practice-confirm': '水を頼んだならうなずき、違えば首を横に振ってください。',
+  done: '相手が水を渡しました。',
 };
 
 let memory = { name: '', water: '' };
@@ -231,9 +231,9 @@ async function routeSpeechTurn(text, turn) {
     pointing = undefined;
     heard.textContent = `聞き取った声　${phrase}`;
     heard.hidden = false;
-    status.textContent = `${character.label}が自分を指して名前を伝えます。`;
+    status.textContent = `相手役が自分を指しています。`;
     pose('intro');
-    promptText(`${character.name}.`, character.locale);
+    promptText();
     return;
   }
   if (addressesCharacter(key) && key !== normalizeSpeech(turn.playback || '')) {
@@ -246,6 +246,11 @@ async function routeSpeechTurn(text, turn) {
   if (!acceptsSpeech()) return;
   cancelNudge();
   cancelReply();
+  if (phase === 'practice') {
+    if (memory.water && key === normalizeSpeech(memory.water)) advance('practice-confirm');
+    else { pose('point-water'); promptText(); }
+    return;
+  }
   const controller = new AbortController();
   replyRequest = controller;
   const aiStartedAt = performance.now();
@@ -261,18 +266,7 @@ async function routeSpeechTurn(text, turn) {
   if (intent === 'acknowledge') nod();
   else if (intent === 'wait') acknowledgeWait(phrase, reply);
   else if (intent === 'address') acknowledgeAddress(phrase);
-  else if (intent === 'confirm_water' && phase === 'practice') {
-    heard.textContent = `聞き取った声　${phrase}`;
-    heard.hidden = false;
-    advance('practice-confirm');
-  }
-  else if (intent === 'give_water' && phase === 'practice') {
-    heard.textContent = `聞き取った声　${phrase}`;
-    heard.hidden = false;
-    advance('done', reply || prompts.done.speech);
-    replySource.textContent = 'WindowsのローカルAIで応答';
-    replySource.hidden = false;
-  } else if (intent === 'answer' && phase !== 'practice') {
+  else if (intent === 'answer') {
     if (speaking) { stopAudio(); pose('listening'); }
     applySpeechResult(phrase);
   } else {
@@ -285,7 +279,10 @@ async function routeSpeechTurn(text, turn) {
   }
 }
 
-function say(text, lang = 'en-US') {
+function sayShared(concept) {
+  const text = concept === 'name' || concept === 'water' ? memory[concept] : '';
+  const lang = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(text) ? 'ja-JP' : 'en-US';
+
   stopAudio();
   if (!active || !text) return;
   const turn = audioTurn;
@@ -326,11 +323,17 @@ function say(text, lang = 'en-US') {
   window.speechSynthesis.speak(utterance);
 }
 
-function promptText(text = prompts[phase]?.speech || '', lang) {
-  spoken.textContent = text;
-  spoken.lang = lang || 'en-US';
-  spoken.hidden = !text;
-  say(text, lang);
+// Generated replies and unconfirmed transcriptions cannot enter the actor's speech.
+function promptText() {
+  spoken.textContent = '';
+  spoken.hidden = true;
+  stopAudio();
+}
+
+function speakShared(concept) {
+  sayShared(concept);
+  spoken.textContent = memory[concept];
+  spoken.hidden = !memory[concept];
 }
 
 function showPhase() {
@@ -349,14 +352,14 @@ function showPhase() {
   pose(phase === 'name' ? 'intro' : element('water').dataset.indicated === 'true' ? 'point-water' : phase === 'check' ? 'point' : 'beckon');
   if (phase === 'done') pose('offer-water', 'happy');
   status.textContent = {
-    name: '相手が名前を伝えようとしています。',
+    name: '相手が自分を指しています。自分を指して名前を伝えましょう。',
     'name-confirm': '名前は合っていますか？',
     water: '相手が指したものを、あなたの言葉で教えましょう。',
-    check: '相手があなたの言葉をまねします。合っていればうなずいてください。',
+    check: '指されたものと聞き取った言葉が合っていれば、うなずいてください。',
     recall: '相手が何を探しているか、指さして答えましょう。',
-    practice: '今度はあなたの番です。さっき聞いた英語を使って、相手に水を頼みましょう。',
+    practice: '覚えた言葉で相手に水を頼みましょう。水をタップすると言葉を教え直せます。',
     'practice-confirm': '聞き取った声を確認できます。合っていればうなずき、言い直したければ首を横に振ってください。',
-    done: '英語で水を頼めました。',
+    done: '相手が水を渡しました。水をタップすると言葉を教え直せます。',
   }[phase];
 }
 
@@ -370,14 +373,12 @@ function advance(next, reply) {
   nudges = 0;
   showPhase();
   refreshRecognition();
-  if (reply) promptText(reply);
-  else if (reply !== null) speakForPhase();
+  if (reply === null) promptText();
+  else speakForPhase();
 }
 
 function speakForPhase() {
-  if (phase === 'name') promptText(`${character.name}. And you?`, character.locale);
-  else if (phase === 'recall') promptText(`${memory.water}？`, 'ja-JP');
-  else if (phase === 'check') promptText(`${candidate}？`, 'ja-JP');
+  if (['recall', 'practice-confirm'].includes(phase)) speakShared('water');
   else promptText();
 }
 
@@ -464,8 +465,7 @@ function applySpeechResult(phrase) {
     confirm.hidden = false;
     showCameraStatus();
     status.textContent = '名前が合っていれば ✓ を押してください。違う場合は入力欄で直すか、✕を押して言い直せます。';
-    const spokenLanguage = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(candidate) ? 'ja-JP' : 'en-US';
-    promptText(`${candidate}?`, spokenLanguage);
+    promptText();
     refreshRecognition();
   } else if (phase === 'water' && target) {
     candidate = phrase.replace(/[.!?。！？]+$/u, '').trim().slice(0, 80);
@@ -489,7 +489,7 @@ function answer(yes) {
       advance('done');
       status.textContent = '相手の聞き返しに答えて、水を頼めました。';
     } else {
-      advance('practice', 'Could you say that again?');
+      advance('practice');
     }
     return;
   }
@@ -688,8 +688,7 @@ function setActive(enabled) {
       confirm.hidden = false;
       showCameraStatus();
       status.textContent = '合っていればうなずくか ✓、違う場合は首を横に振るか ✕ で答えてください。';
-      const language = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(candidate) ? 'ja-JP' : 'en-US';
-      promptText(`${candidate}?`, language);
+      promptText();
     } else {
       showPhase();
       speakForPhase();
@@ -759,19 +758,22 @@ element('pause').onclick = () => setActive(!active);
 element('yes').onclick = () => answer(true);
 element('no').onclick = () => answer(false);
 element('help').onclick = () => {
-  const text = phase === 'name' ? `相手は${character.label}です。あなたの名前を聞いています。`
-    : prompts[phase]?.hint || '相手があなたの名前を確認しています。';
+  const text = phase === 'name' ? '自分を指して、名前を伝えてください。'
+    : hints[phase] || '相手があなたの名前を確認しています。';
   helpText.textContent = text;
   helpText.hidden = false;
-  say(text, 'ja-JP');
 };
-element('repeat').onclick = () => say(spoken.textContent, spoken.lang);
+element('repeat').onclick = () => { if (['recall', 'practice-confirm'].includes(phase)) speakShared('water'); };
 for (const id of ['water', 'tree']) {
   element(id).onclick = () => {
     if (!active) return;
     if (phase === 'recall' && id === 'water') advance('practice');
-    else if (phase === 'recall') { pose('point'); promptText(`${memory.water}？`, 'ja-JP'); }
-    else if (phase === 'water') {
+    else if (phase === 'recall') { pose('point-water'); speakShared('water'); }
+    else if (id === 'water' && ['practice', 'done'].includes(phase)) {
+      memory.water = '';
+      element('export').disabled = true;
+      askAboutWater();
+    } else if (phase === 'water') {
       target = id;
       showPhase();
       pose('point', 'listening');
