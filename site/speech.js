@@ -32,7 +32,7 @@ function makeWav(frames, sampleRate) {
   return buffer;
 }
 
-export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, onSpeechStart, onSustainedSpeech, onText, onTurnEnd, onStatus }) {
+export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, manualOnly = () => false, onSpeechStart, onSustainedSpeech, onText, onTurnEnd, onStatus }) {
   let run;
 
   function stop() {
@@ -86,6 +86,12 @@ export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, onS
           return;
         }
         const frame = event.inputBuffer.getChannelData(0);
+        if (current.manual) {
+          current.manual.frames.push(frame.slice());
+          if (current.manual.frames.length * frameMs >= 6500) finishManual();
+          return;
+        }
+        if (manualOnly()) { reset(); return; }
         const loudness = Math.sqrt(frame.reduce((sum, sample) => sum + sample * sample, 0) / frame.length);
         const overlapping = turn ? Boolean(turn.playback) : isSpeaking();
         const voiced = loudness > Math.max(overlapping ? 0.02 : 0.009, noise * 3);
@@ -133,6 +139,7 @@ export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, onS
     onStatus('NASで文字起こししています。');
     try {
       const headers = { 'Content-Type': 'audio/wav', 'X-Island-Language': turn.language };
+      if (turn.manual) headers['X-Island-Manual'] = '1';
       if (turn.hint) headers['X-Island-Name-Hint'] = encodeURIComponent(turn.hint);
       const response = await fetch('/api/island/transcribe', {
         method: 'POST', headers, body: makeWav(frames, current.audio.sampleRate), signal: request.signal,
@@ -151,6 +158,37 @@ export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, onS
     }
   }
 
+  async function beginManual() {
+    if (!run?.stream) await start();
+    const current = run;
+    if (!current?.stream || !canListen() || current.manual || current.request) return false;
+    try {
+      if (current.audio.state !== 'running') await current.audio.resume();
+    } catch {
+      onStatus('マイクを再開できませんでした。Safariのマイク許可を確認してください。');
+      return false;
+    }
+    if (run !== current || !canListen() || current.audio.state !== 'running') return false;
+    current.manual = { frames: [], turn: { ...contextForTurn(), manual: true } };
+    onSpeechStart();
+    onStatus('録音中です。話し終えたら「録音を止める」を押してください。');
+    return true;
+  }
+
+  function finishManual() {
+    const current = run;
+    const recording = current?.manual;
+    if (!recording) return;
+    current.manual = undefined;
+    const { frames, turn } = recording;
+    turn.speechEndedAt = performance.now();
+    if (frames.length && canListen()) void transcribe(current, frames, turn);
+    else {
+      onStatus('録音できませんでした。マイクの許可を確認し、もう一度お試しください。');
+      onTurnEnd(turn);
+    }
+  }
+
   async function ensureListening() {
     const current = run;
     if (!current?.stream) return;
@@ -166,5 +204,5 @@ export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, onS
     }
   }
 
-  return { start, stop, ensureListening };
+  return { start, stop, ensureListening, beginManual, finishManual, isRecording: () => Boolean(run?.manual) };
 }

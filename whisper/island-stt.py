@@ -73,6 +73,7 @@ def make_handler(model, settings):
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
+            manual = self.headers.get("X-Island-Manual") == "1"
             language = self.headers.get("X-Island-Language", "auto")
             hint = unquote(self.headers.get("X-Island-Name-Hint", ""))[:40].strip()
             if not 46 <= length <= 1048576 or language not in ("auto", "en", "ja"):
@@ -104,7 +105,7 @@ def make_handler(model, settings):
                         hotwords=hint or None,
                         beam_size=5,
                         condition_on_previous_text=False,
-                        vad_filter=True,
+                        vad_filter=not manual,
                         vad_parameters={"min_silence_duration_ms": 250},
                     )
                     text = " ".join(segment.text.strip() for segment in segments).strip()

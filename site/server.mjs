@@ -191,6 +191,7 @@ export function createApp({
 async function forwardSpeech(request, response, upstream, fetcher) {
   const language = request.headers['x-island-language'];
   const hint = request.headers['x-island-name-hint'] || '';
+  const manual = request.headers['x-island-manual'] === '1';
   if (request.headers['content-type'] !== 'audio/wav' || !['en', 'ja', 'auto'].includes(language) || hint.length > 480) {
     return send(response, 400, { error: 'Invalid audio request' });
   }
@@ -209,7 +210,7 @@ async function forwardSpeech(request, response, upstream, fetcher) {
   try {
     const result = await fetcher(upstream, {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/wav', 'X-Island-Language': language, 'X-Island-Name-Hint': hint },
+      headers: { 'Content-Type': 'audio/wav', 'X-Island-Language': language, 'X-Island-Name-Hint': hint, ...(manual ? { 'X-Island-Manual': '1' } : {}) },
       body: Buffer.concat(chunks),
       signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(45000)]),
     });

@@ -1,5 +1,5 @@
 import { createPlacement, examples } from './placement.mjs';
-import { createWhisperSpeech } from './speech.js?v=19';
+import { createWhisperSpeech } from './speech.js?v=20';
 import { characters, defaultCharacter, findCharacter } from './characters.mjs';
 
 const element = (id) => document.getElementById(id);
@@ -68,22 +68,28 @@ const characterChoice = element('characterChoice');
 const whisperSpeech = createWhisperSpeech({
   canListen: () => active && hearsSpeech() && (!speaking || (phase !== 'lesson' && bargeIn.checked)),
   isSpeaking: () => Boolean(speaking),
+  manualOnly: () => phase === 'lesson',
   contextForTurn: () => {
     const gesture = recentPointing();
     const naming = phase === 'name' || gesture === 'self';
     const hint = naming && !speaking ? element('nameHint').value.trim() : '';
     const language = speaking ? 'auto' : naming ? nameLanguage.value : !acceptsSpeech() || ['water', 'lesson'].includes(phase) ? 'auto' : 'en';
-    return { phase, language, hint, gesture, playback: speaking, audioTurn, endSilenceMs: naming && !speaking ? 1050 : 650 };
+    return { phase, lessonTarget, language, hint, gesture, playback: speaking, audioTurn, endSilenceMs: naming && !speaking ? 1050 : 650 };
   },
   onSustainedSpeech: pauseForWhisper,
   onSpeechStart: () => { recordingSpeech = true; cancelNudge(); replyTiming.hidden = true; },
   onText: routeSpeechTurn,
   onTurnEnd: (turn) => {
     recordingSpeech = false;
+    if (turn.manual && phase === 'lesson') renderLesson();
     resumeAfterWhisper(turn);
     scheduleNudge();
   },
-  onStatus: (text) => { speechStatus.textContent = text; speechStatus.hidden = !text; },
+  onStatus: (text) => {
+    speechStatus.textContent = text;
+    speechStatus.hidden = !text;
+    if (phase === 'lesson') renderLesson();
+  },
 });
 
 function acceptsSpeech() {
@@ -224,7 +230,7 @@ async function routeSpeechTurn(text, turn) {
   const key = normalizeSpeech(phrase);
   const isPlayback = turn.playback && normalizeSpeech(turn.playback).includes(key);
   if (phase === 'lesson') {
-    if (key && !isPlayback && acceptsSpeech() && !speaking) receiveLessonSpeech(phrase);
+    if ((turn.lessonTarget === undefined || turn.lessonTarget === lessonTarget) && key && !isPlayback && acceptsSpeech() && !speaking) receiveLessonSpeech(phrase);
     return;
   }
   if (key && !isPlayback && turn.gesture === 'self' && (phase === 'name' || canCorrectName())) {
@@ -338,9 +344,9 @@ function speakActor(text, language, onFinish) {
     actor.classList.remove('speaking');
     if (onFinish) { onFinish(); return; }
     if (phase === 'lesson') {
-      showCameraStatus();
+      renderLesson();
       if (acceptsSpeech()) {
-        status.textContent = '今、話してください。';
+        status.textContent = speechMode.value === 'whisper' ? '「録音する」を押してから話してください。' : '今、話してください。';
         if (speechMode.value === 'whisper') void whisperSpeech.ensureListening();
         else refreshRecognition();
       }
@@ -816,6 +822,11 @@ characterChoice.onchange = () => {
 };
 
 function renderLesson() {
+  const record = element('recordLesson');
+  record.hidden = speechMode.value !== 'whisper';
+  const capturing = whisperSpeech.isRecording();
+  record.disabled = !active || !acceptsSpeech() || Boolean(speaking) || (recordingSpeech && !capturing);
+  record.textContent = capturing ? '録音を止める' : '録音する';
   element('resumeLessonMic').disabled = !active || !acceptsSpeech();
   element('listenExample').disabled = !active || lessonQuiz || !Object.hasOwn(examples, lessonTarget) || Boolean(placement.pending);
   element('proposePlacement').disabled = !active || lessonQuiz || Boolean(placement.pending) || !Object.keys(examples).every(key => placement.agreed[key]);
@@ -857,7 +868,7 @@ element('openPlacement').onclick = () => {
 };
 
 element('lessonObjects').onclick = ({ target: button }) => {
-  if (!active || lessonQuiz || !Object.hasOwn(examples, button.dataset.target)) return;
+  if (!active || lessonQuiz || recordingSpeech || !Object.hasOwn(examples, button.dataset.target)) return;
   placement.answer(false);
   promptText();
   lessonTarget = button.dataset.target;
@@ -870,9 +881,17 @@ element('lessonObjects').onclick = ({ target: button }) => {
   refreshRecognition();
 };
 element('listenExample').onclick = () => {
-  if (!active || lessonQuiz || placement.pending || !Object.hasOwn(examples, lessonTarget)) return;
+  if (!active || lessonQuiz || recordingSpeech || placement.pending || !Object.hasOwn(examples, lessonTarget)) return;
   exampleRequested = true;
   speakActor(examples[lessonTarget], 'en-US');
+};
+element('recordLesson').onclick = async () => {
+  if (!active || !acceptsSpeech() || speaking) return;
+  if (whisperSpeech.isRecording()) { whisperSpeech.finishManual(); return; }
+  if (recordingSpeech) return;
+  element('recordLesson').disabled = true;
+  await whisperSpeech.beginManual();
+  renderLesson();
 };
 element('resumeLessonMic').onclick = () => {
   if (!active || !acceptsSpeech()) return;
@@ -886,7 +905,7 @@ element('resumeLessonMic').onclick = () => {
   }
 };
 element('proposePlacement').onclick = () => {
-  if (!active || lessonQuiz || placement.pending) return;
+  if (!active || lessonQuiz || recordingSpeech || placement.pending) return;
   lessonTarget = 'request';
   element('lessonMove').textContent = '';
   status.textContent = '水と台を指すつもりで、覚えた言葉を組み合わせて頼んでください。';
@@ -894,7 +913,7 @@ element('proposePlacement').onclick = () => {
   refreshRecognition();
 };
 element('askPlacement').onclick = () => {
-  if (!active || !placement.request || placement.pending) return;
+  if (!active || recordingSpeech || !placement.request || placement.pending) return;
   lessonQuiz = true;
   lessonHint = false;
   const form = element('placementChoices');

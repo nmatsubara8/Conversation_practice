@@ -32,7 +32,9 @@ if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
 Copy-Item -Path '.\site\*' -Destination $destination -Recurse -Force -ErrorAction Stop
 ```
 
-今回コピーするのは `site` の中身です。Compose ファイルや Whisper の設定はそのまま使います。Windows の Ollama を利用する場合は、再ビルド前に Compose の `web.environment` で `OLLAMA_URL` が Windows 側の URL（`http://<WindowsのTailscale IP>:11434`）に設定されていることを確認します。Whisper が別サービスの場合は、既存の `STT_URL` を使います。
+通常の画面更新でコピーするのは `site` の中身です。Compose ファイルや Whisper の設定はそのまま使います。Windows の Ollama を利用する場合は、再ビルド前に Compose の `web.environment` で `OLLAMA_URL` が Windows 側の URL（`http://<WindowsのTailscale IP>:11434`）に設定されていることを確認します。Whisper が別サービスの場合は、既存の `STT_URL` を使います。
+
+手動録音を使う版への初回更新では、`whisper/island-stt.py` も NAS の対応する `whisper` フォルダーへコピーします。
 
 ### 2. NAS で web サービスを更新する
 
@@ -46,7 +48,7 @@ ssh NAS_USER@NAS_IP
 
 ```bash
 cd '/volume1/apps/language/会話練習アプリ'
-sudo docker compose -p island-poc up -d --build --no-deps web
+sudo docker compose -p island-poc up -d --build --no-deps whisper web
 sudo docker compose -p island-poc ps web
 sudo docker compose -p island-poc exec -T web node --check /app/placement.mjs
 ```
@@ -56,7 +58,7 @@ sudo docker compose -p island-poc exec -T web node --check /app/placement.mjs
 ### 3. iPhone で確認する
 
 1. Safari でいつもの HTTPS の URL を開き直します。「音声認識の設定」で **NAS（Whisper）** を選び、「水とコップの練習」を開きます。うなずきを使う場合は Safari にカメラを許可します。
-2. **水 → 音を聞く** の順にタップします。`water` を聞き、「今、話してください。」が表示されてから「みず」と言います。声が拾われない場合は「マイクを再開」を押し、「マイクの準備ができました。」を確認してから言い直します。「water、みず」と返ってきたら、相手役が言い終えてからうなずくか ✓ を押します。聞き違いなら ✕ で言い直せます。
+2. **水 → 音を聞く** の順にタップします。`water` を聞き、**録音する → 「みず」と話す → 録音を止める** の順で操作します。声が拾われない場合は「マイクを再開」を押し、「マイクの準備ができました。」を確認してから言い直します。「water、みず」と返ってきたら、相手役が言い終えてからうなずくか ✓ を押します。聞き違いなら ✕ で言い直せます。
 3. **空のコップ**と**台の上**を順に選び、「コップ」「ここ」と教え、同じように確かめます。
 4. **水を置くよう頼む**を押し、「みず、ここ」と言います。相手役が水を台に置こうとする表示を確認し、✓ を押します。
 5. **相手のお願いを聞く**を押します。声を聞いて「水」「台の上」「置く」を選び、「動作をする」を押します。台に水が表示されれば一往復できています。迷った場合は「身ぶりを見る」を使えます。
