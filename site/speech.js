@@ -151,5 +151,20 @@ export function createWhisperSpeech({ canListen, isSpeaking, contextForTurn, onS
     }
   }
 
-  return { start, stop };
+  async function ensureListening() {
+    const current = run;
+    if (!current?.stream) return;
+    if (!current.stream.getAudioTracks().some(track => track.readyState === 'live')) {
+      onStatus('マイクが停止しました。「マイクを再開」を押してください。');
+      return;
+    }
+    try {
+      if (current.audio.state !== 'running') await current.audio.resume();
+      if (current === run && current.audio.state === 'running') onStatus('マイクの準備ができました。');
+    } catch {
+      if (current === run) onStatus('マイクを再開できません。「マイクを再開」を押してください。');
+    }
+  }
+
+  return { start, stop, ensureListening };
 }

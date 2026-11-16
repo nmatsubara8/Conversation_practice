@@ -1,5 +1,5 @@
 import { createPlacement, examples } from './placement.mjs';
-import { createWhisperSpeech } from './speech.js?v=18';
+import { createWhisperSpeech } from './speech.js?v=19';
 import { characters, defaultCharacter, findCharacter } from './characters.mjs';
 
 const element = (id) => document.getElementById(id);
@@ -66,7 +66,7 @@ const nameLanguage = element('nameLanguage');
 const nameReview = element('nameReview');
 const characterChoice = element('characterChoice');
 const whisperSpeech = createWhisperSpeech({
-  canListen: () => active && hearsSpeech() && (!speaking || bargeIn.checked),
+  canListen: () => active && hearsSpeech() && (!speaking || (phase !== 'lesson' && bargeIn.checked)),
   isSpeaking: () => Boolean(speaking),
   contextForTurn: () => {
     const gesture = recentPointing();
@@ -327,18 +327,37 @@ function speakActor(text, language, onFinish) {
   };
   speaking = text;
   actor.classList.add('speaking');
+  let finished = false;
+  let watchdog;
   const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearInterval(watchdog);
     if (turn !== audioTurn) return;
     speaking = '';
     actor.classList.remove('speaking');
     if (onFinish) { onFinish(); return; }
-    if (phase === 'lesson') showCameraStatus();
+    if (phase === 'lesson') {
+      showCameraStatus();
+      if (acceptsSpeech()) {
+        status.textContent = '今、話してください。';
+        if (speechMode.value === 'whisper') void whisperSpeech.ensureListening();
+        else refreshRecognition();
+      }
+    }
     if (active && acceptsSpeech()) actor.classList.add('listening');
     scheduleNudge();
   };
   utterance.onend = finish;
   utterance.onerror = finish;
-  window.speechSynthesis.speak(utterance);
+  const synthesis = window.speechSynthesis;
+  synthesis.speak(utterance);
+  if (phase === 'lesson' && !finished) {
+    // Some mobile sessions finish playback without delivering the utterance event.
+    watchdog = setInterval(() => {
+      if (turn !== audioTurn || (!synthesis.speaking && !synthesis.pending)) finish();
+    }, 750);
+  }
 }
 
 // Generated replies and unconfirmed transcriptions cannot enter the actor's speech.
@@ -797,6 +816,7 @@ characterChoice.onchange = () => {
 };
 
 function renderLesson() {
+  element('resumeLessonMic').disabled = !active || !acceptsSpeech();
   element('listenExample').disabled = !active || lessonQuiz || !Object.hasOwn(examples, lessonTarget) || Boolean(placement.pending);
   element('proposePlacement').disabled = !active || lessonQuiz || Boolean(placement.pending) || !Object.keys(examples).every(key => placement.agreed[key]);
   element('askPlacement').disabled = !active || !placement.request || Boolean(placement.pending);
@@ -853,6 +873,17 @@ element('listenExample').onclick = () => {
   if (!active || lessonQuiz || placement.pending || !Object.hasOwn(examples, lessonTarget)) return;
   exampleRequested = true;
   speakActor(examples[lessonTarget], 'en-US');
+};
+element('resumeLessonMic').onclick = () => {
+  if (!active || !acceptsSpeech()) return;
+  stopAudio();
+  recordingSpeech = false;
+  status.textContent = 'マイクの準備ができたら、もう一度話してください。';
+  if (speechMode.value === 'whisper') void whisperSpeech.start();
+  else {
+    refreshRecognition();
+    listen();
+  }
 };
 element('proposePlacement').onclick = () => {
   if (!active || lessonQuiz || placement.pending) return;
